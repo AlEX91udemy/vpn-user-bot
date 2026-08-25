@@ -1,0 +1,254 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum CustomerStatus {
+  ACTIVE
+  BLOCKED
+}
+
+enum OrderStatus {
+  PENDING_PAYMENT
+  PAID
+  FULFILLED
+  CANCELED
+  PAYMENT_FAILED
+  FULFILLMENT_FAILED
+}
+
+enum PaymentProviderType {
+  TELEGRAM_STARS
+}
+
+enum PaymentStatus {
+  SUCCEEDED
+}
+
+model Customer {
+  id                      String                    @id @default(cuid())
+  telegramUserId          BigInt                    @unique
+  username                String?
+  firstName               String?
+  lastName                String?
+  languageCode            String?
+  status                  CustomerStatus            @default(ACTIVE)
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime                  @updatedAt
+  remnawaveUserId         String?                   @unique
+  remnawaveUsername       String?                   @unique
+  orders                  Order[]
+  subscription            Subscription?
+  trialClaim              TrialClaim?
+  provisioningLock        CustomerProvisioningLock?
+  subscriptionReissueLock SubscriptionReissueLock?
+
+  @@map("customers")
+}
+
+model Tariff {
+  id                String   @id @default(cuid())
+  name              String
+  description       String
+  durationDays      Int
+  amountMinor       Int
+  currency          String
+  amountXtr         Int?
+  deviceLimit       Int?
+  trafficLimitBytes BigInt?
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  orders            Order[]
+
+  @@index([isActive])
+  @@map("tariffs")
+}
+
+model Order {
+  id                        String            @id @default(cuid())
+  customerId                String
+  customer                  Customer          @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  tariffId                  String
+  tariff                    Tariff            @relation(fields: [tariffId], references: [id], onDelete: Restrict)
+  status                    OrderStatus       @default(PENDING_PAYMENT)
+  tariffNameSnapshot        String
+  durationDaysSnapshot      Int
+  amountXtr                 Int
+  currency                  String            @default("XTR")
+  deviceLimitSnapshot       Int?
+  trafficLimitBytesSnapshot BigInt?
+  telegramInvoicePayload    String            @unique
+  telegramPaymentChargeId   String?           @unique
+  pendingCheckoutKey        String?           @unique
+  createdAt                 DateTime          @default(now())
+  updatedAt                 DateTime          @updatedAt
+  paidAt                    DateTime?
+  fulfilledAt               DateTime?
+  payment                   Payment?
+  fulfillment               OrderFulfillment?
+
+  @@index([customerId, status])
+  @@map("orders")
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  EXPIRED
+  DISABLED
+  PROVISIONING
+  ERROR
+}
+
+enum TrialClaimStatus {
+  PENDING
+  FULFILLED
+  FAILED
+}
+
+enum FulfillmentStatus {
+  PENDING
+  PROCESSING
+  SUCCEEDED
+  FAILED
+}
+
+model Subscription {
+  id                String             @id @default(cuid())
+  customerId        String             @unique
+  customer          Customer           @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  remnawaveUserId   String             @unique
+  tariffId          String?
+  status            SubscriptionStatus @default(PROVISIONING)
+  expiresAt         DateTime?
+  trafficLimitBytes BigInt?
+  deviceLimit       Int?
+  subscriptionUrl   String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  lastSyncedAt      DateTime?
+  lastSyncError     String?
+
+  @@map("subscriptions")
+}
+
+model TrialClaim {
+  id              String           @id @default(cuid())
+  customerId      String           @unique
+  customer        Customer         @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  status          TrialClaimStatus @default(PENDING)
+  claimedAt       DateTime         @default(now())
+  fulfilledAt     DateTime?
+  attempts        Int              @default(0)
+  lastError       String?
+  nextRetryAt     DateTime?
+  targetExpiresAt DateTime?
+  lockToken       String?          @unique
+  lockExpiresAt   DateTime?
+  retryable       Boolean          @default(true)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([status, nextRetryAt, lockExpiresAt])
+  @@map("trial_claims")
+}
+
+model OrderFulfillment {
+  id              String            @id @default(cuid())
+  orderId         String            @unique
+  order           Order             @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  status          FulfillmentStatus @default(PENDING)
+  attempts        Int               @default(0)
+  lastError       String?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  nextRetryAt     DateTime?
+  targetExpiresAt DateTime?
+  lockToken       String?           @unique
+  lockExpiresAt   DateTime?
+  retryable       Boolean           @default(true)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([status, nextRetryAt])
+  @@map("order_fulfillments")
+}
+
+model CustomerProvisioningLock {
+  customerId  String    @id
+  customer    Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  lockToken   String?   @unique
+  lockedUntil DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  @@map("customer_provisioning_locks")
+}
+
+model SubscriptionReissueLock {
+  customerId      String    @id
+  customer        Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  lockToken       String?   @unique
+  lockedUntil     DateTime?
+  cooldownUntil   DateTime?
+  lastSucceededAt DateTime?
+  updatedAt       DateTime  @updatedAt
+
+  @@map("subscription_reissue_locks")
+}
+
+enum MtprotoProxyStatus {
+  ONLINE
+  OFFLINE
+  INVALID
+  UNKNOWN
+}
+
+model MtprotoProxy {
+  id        String            @id @default(cuid())
+  host      String
+  port      Int
+  secret    String
+  status    MtprotoProxyStatus
+  pingMs    Int?
+  source    String            @default("luminto")
+  updatedAt DateTime          @updatedAt
+  assignments MtprotoAssignment[]
+
+  @@unique([host, port, secret])
+  @@index([status, pingMs])
+  @@map("mtproto_proxies")
+}
+
+model MtprotoAssignment {
+  telegramUserId BigInt       @id
+  proxyId        String
+  proxy          MtprotoProxy @relation(fields: [proxyId], references: [id], onDelete: Cascade)
+  assignedAt     DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([proxyId])
+  @@map("mtproto_assignments")
+}
+
+model Payment {
+  id                String              @id @default(cuid())
+  orderId           String              @unique
+  order             Order               @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  provider          PaymentProviderType
+  providerPaymentId String?
+  providerEventId   String?
+  amountXtr         Int
+  currency          String              @default("XTR")
+  status            PaymentStatus       @default(SUCCEEDED)
+  referenceMetadata Json?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  @@unique([provider, providerPaymentId])
+  @@unique([provider, providerEventId])
+  @@map("payments")
+}
